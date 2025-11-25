@@ -1,5 +1,8 @@
 import { motion, animate } from 'framer-motion';
-import { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useEffect, useState, useImperativeHandle, forwardRef, useMemo } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrthographicCamera, useGLTF } from '@react-three/drei';
+import * as THREE from 'three';
 
 interface DiceProps {
   dice: [number, number] | null;
@@ -11,12 +14,102 @@ export interface DiceRef {
   throwDice: (velocity: { x: number; y: number }) => void;
 }
 
+// Mapping of dice numbers to rotations (in radians)
+// Based on standard dice layout where opposite sides sum to 7
+const DICE_ROTATIONS: Record<number, [number, number, number]> = {
+  1: [Math.PI / 2, 0, 0],           // 1 on top (rotate 90° on Z axis from 4)
+  2: [0, -Math.PI / 2, 0],          // 2 on top (rotate -90° on Y axis from 4)
+  3: [Math.PI, 0, 0],          // 3 on top (rotate -90° on X axis from 4)
+  4: [0, 0, 0],                     // 4 on top (default position)
+  5: [0, Math.PI / 2, 0],           // 5 on top (rotate 90° on Y axis from 4)
+  6: [-Math.PI / 2, 0, 0],           // 6 on top (rotate 90° on X axis from 4)
+};
+
+// Single 3D Dice model component with memoized clone
+function DiceModel({ value }: { value?: number }) {
+  const { scene } = useGLTF('/models/dice/scene.gltf');
+  
+  // Clone the scene only once when the component mounts
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
+  
+  return <primitive object={clonedScene} />;
+}
+
+// Shared animation component that handles both dice
+function DiceAnimationController({ 
+  tiltX, 
+  tiltY, 
+  die1Ref, 
+  die2Ref,
+  value1,
+  value2 
+}: { 
+  tiltX: number; 
+  tiltY: number; 
+  die1Ref: React.RefObject<THREE.Group>;
+  die2Ref: React.RefObject<THREE.Group>;
+  value1?: number;
+  value2?: number;
+}) {
+  const targetRotation = useRef({ x: 0, y: 0 });
+  const baseRotation1 = useRef({ x: 0, y: 0, z: 0 });
+  const baseRotation2 = useRef({ x: 0, y: 0, z: 0 });
+
+  // Update base rotations when values change
+  useEffect(() => {
+    if (value1 && DICE_ROTATIONS[value1]) {
+      const [x, y, z] = DICE_ROTATIONS[value1];
+      baseRotation1.current = { x, y, z };
+    }
+    if (value2 && DICE_ROTATIONS[value2]) {
+      const [x, y, z] = DICE_ROTATIONS[value2];
+      baseRotation2.current = { x, y, z };
+    }
+  }, [value1, value2]);
+
+  // Single useFrame for both dice
+  useFrame(() => {
+    // Calculate target tilt rotation based on velocity
+    const tiltRotationX = -tiltY * 1.5;
+    const tiltRotationY = tiltX * 1.5;
+
+    // Smoothly interpolate tilt toward current velocity-based tilt
+    targetRotation.current.x += (tiltRotationX - targetRotation.current.x) * 0.12;
+    targetRotation.current.y += (tiltRotationY - targetRotation.current.y) * 0.12;
+
+    // Apply rotation to die 1
+    if (die1Ref.current) {
+      const finalRotationX = baseRotation1.current.x + targetRotation.current.x;
+      const finalRotationY = baseRotation1.current.y + targetRotation.current.y;
+      
+      die1Ref.current.rotation.x = finalRotationX;
+      die1Ref.current.rotation.y = finalRotationY;
+      die1Ref.current.rotation.z += (baseRotation1.current.z - die1Ref.current.rotation.z) * 0.3;
+    }
+
+    // Apply rotation to die 2
+    if (die2Ref.current) {
+      const finalRotationX = baseRotation2.current.x + targetRotation.current.x;
+      const finalRotationY = baseRotation2.current.y + targetRotation.current.y;
+      
+      die2Ref.current.rotation.x = finalRotationX;
+      die2Ref.current.rotation.y = finalRotationY;
+      die2Ref.current.rotation.z += (baseRotation2.current.z - die2Ref.current.rotation.z) * 0.3;
+    }
+  });
+
+  return null;
+}
+
 const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const die1Ref = useRef<HTMLDivElement>(null);
   const die2Ref = useRef<HTMLDivElement>(null);
+  const die1GroupRef = useRef<THREE.Group>(null);
+  const die2GroupRef = useRef<THREE.Group>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isThrowing, setIsThrowing] = useState(false);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const pointerPosRef = useRef({ x: 0, y: 0 });
   const previousPosRef = useRef({ x: 0, y: 0 });
   const velocityRef = useRef({ x: 0, y: 0 });
@@ -160,6 +253,12 @@ const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) 
       y: (newPos.y - previousPosRef.current.y) / dt,
     };
 
+    // Update tilt based on velocity
+    setTilt({
+      x: velocityRef.current.x,
+      y: velocityRef.current.y,
+    });
+
     previousPosRef.current = { ...pointerPosRef.current };
     pointerPosRef.current = newPos;
     lastTimeRef.current = now;
@@ -191,6 +290,9 @@ const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) 
   const handlePointerUp = () => {
     if (!isDragging) return;
     setIsDragging(false);
+
+    // Reset tilt
+    setTilt({ x: 0, y: 0 });
 
     // Check if thrown (swipe up with high velocity)
     const speed = Math.sqrt(velocityRef.current.x ** 2 + velocityRef.current.y ** 2);
@@ -269,19 +371,41 @@ const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) 
     >
       <motion.div
         ref={die1Ref}
-        className="w-14 h-14 sm:w-16 sm:h-16 bg-white border-2 border-gray-800 rounded-lg flex items-center justify-center text-xl sm:text-2xl font-bold shadow-[0_6px_16px_rgba(0,0,0,0.15)] cursor-grab active:cursor-grabbing"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        className="w-20 h-20 sm:w-24 sm:h-24 cursor-grab active:cursor-grabbing"
+        whileHover={isThrowing ? {} : { scale: 1.05 }}
+        whileTap={isThrowing ? {} : { scale: 0.95 }}
       >
-        {dice ? dice[0] : '—'}
+        <Canvas>
+          <OrthographicCamera makeDefault position={[0, 0, 5]} zoom={50} />
+          <ambientLight intensity={0.8} />
+          <directionalLight position={[5, 5, 5]} intensity={1} />
+          <DiceAnimationController 
+            tiltX={tilt.x} 
+            tiltY={tilt.y} 
+            die1Ref={die1GroupRef}
+            die2Ref={die2GroupRef}
+            value1={dice?.[0]}
+            value2={dice?.[1]}
+          />
+          <group ref={die1GroupRef}>
+            <DiceModel value={dice?.[0]} />
+          </group>
+        </Canvas>
       </motion.div>
       <motion.div
         ref={die2Ref}
-        className="w-14 h-14 sm:w-16 sm:h-16 bg-white border-2 border-gray-800 rounded-lg flex items-center justify-center text-xl sm:text-2xl font-bold shadow-[0_6px_16px_rgba(0,0,0,0.15)] cursor-grab active:cursor-grabbing"
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
+        className="w-20 h-20 sm:w-24 sm:h-24 cursor-grab active:cursor-grabbing"
+        whileHover={isThrowing ? {} : { scale: 1.05 }}
+        whileTap={isThrowing ? {} : { scale: 0.95 }}
       >
-        {dice ? dice[1] : '—'}
+        <Canvas>
+          <OrthographicCamera makeDefault position={[0, 0, 5]} zoom={50} />
+          <ambientLight intensity={0.8} />
+          <directionalLight position={[5, 5, 5]} intensity={1} />
+          <group ref={die2GroupRef}>
+            <DiceModel value={dice?.[1]} />
+          </group>
+        </Canvas>
       </motion.div>
     </motion.div>
   );
