@@ -25,6 +25,57 @@ const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) 
   const SWIPE_THRESHOLD = 3; // Velocity threshold for throw detection
   const FOLLOW_SPEED = 0.067; // How closely dice follow the finger (3x faster)
 
+  // Helper function to animate a single die throw
+  const animateSingleDieThrow = (
+    dieRef: React.RefObject<HTMLDivElement>,
+    directionX: number,
+    directionY: number,
+    duration: number
+  ) => {
+    if (!dieRef.current) return;
+
+    const throwDistance = 250 + Math.random() * 20;
+    const endX = directionX * throwDistance;
+    const endY = directionY * throwDistance;
+    const rotation = Math.random() * 720 + 360;
+
+    // Position and rotation animation
+    animate(dieRef.current, {
+      x: endX,
+      y: endY,
+      rotate: rotation,
+    }, {
+      type: 'tween',
+      ease: [0.34, 1.56, 0.64, 1], // easeOutBack
+      duration,
+    });
+    
+    // Separate scale animation with easeOutBounce
+    animate(dieRef.current, {
+      scale: 0.6,
+    }, {
+      type: 'tween',
+      ease: [0.68, -0.55, 0.265, 1.55], // easeOutBounce
+      duration: 0.4,
+    });
+  };
+
+  // Helper function to reset a single die
+  const resetSingleDie = (dieRef: React.RefObject<HTMLDivElement>) => {
+    if (!dieRef.current) return;
+
+    animate(dieRef.current, {
+      x: 0,
+      y: 0,
+      rotate: 0,
+      scale: 1,
+    }, {
+      type: 'spring',
+      stiffness: 200,
+      damping: 15,
+    });
+  };
+
   const throwDice = async (velocity: { x: number; y: number }) => {
     setIsThrowing(true);
 
@@ -44,91 +95,29 @@ const Dice = forwardRef<DiceRef, DiceProps>(({ dice, position, onThrown }, ref) 
 
     console.log('Normalized direction:', { x: normalizedVelX, y: normalizedVelY });
 
-    // Add random variation to direction (-20 to +20 degrees)
-    const randomAngle = (Math.random() - 0.5) * (Math.PI / 4.5); // ~20 degrees
-    const cos = Math.cos(randomAngle);
-    const sin = Math.sin(randomAngle);
+    // Calculate direction for die 1 with random variation (-20 to +20 degrees)
+    const randomAngle1 = (Math.random() - 0.5) * (Math.PI / 4.5);
+    const cos1 = Math.cos(randomAngle1);
+    const sin1 = Math.sin(randomAngle1);
+    const die1DirX = normalizedVelX * cos1 - normalizedVelY * sin1;
+    const die1DirY = normalizedVelX * sin1 + normalizedVelY * cos1;
     
-    const die1DirX = normalizedVelX * cos - normalizedVelY * sin;
-    const die1DirY = normalizedVelX * sin + normalizedVelY * cos;
-    
-    // Different random angle for die 2
+    // Calculate direction for die 2 with different random variation
     const randomAngle2 = (Math.random() - 0.5) * (Math.PI / 4.5);
     const cos2 = Math.cos(randomAngle2);
     const sin2 = Math.sin(randomAngle2);
-    
     const die2DirX = normalizedVelX * cos2 - normalizedVelY * sin2;
     const die2DirY = normalizedVelX * sin2 + normalizedVelY * cos2;
 
-    // Calculate end positions based on direction
-    const throwDistance = 200 + Math.random() * 100;
-    const die1EndX = die1DirX * throwDistance;
-    const die1EndY = die1DirY * throwDistance;
-    
-    const throwDistance2 = 200 + Math.random() * 100;
-    const die2EndX = die2DirX * throwDistance2;
-    const die2EndY = die2DirY * throwDistance2;
-
-    console.log('Die 1 throw to:', { x: die1EndX, y: die1EndY });
-    console.log('Die 2 throw to:', { x: die2EndX, y: die2EndY });
-
-    // Random rotation for visual effect
-    const die1Rotation = Math.random() * 720 + 360;
-    const die2Rotation = Math.random() * 720 + 360;
-
-    // Animate die 1 throw
-    if (die1Ref.current) {
-      animate(die1Ref.current, {
-        x: die1EndX,
-        y: die1EndY,
-        rotate: die1Rotation,
-      }, {
-        type: 'tween',
-        ease: [0.34, 1.56, 0.64, 1], // easeOutBack
-        duration: 0.8,
-      });
-    }
-
-    // Animate die 2 throw with slightly different timing
-    if (die2Ref.current) {
-      animate(die2Ref.current, {
-        x: die2EndX,
-        y: die2EndY,
-        rotate: die2Rotation,
-      }, {
-        type: 'tween',
-        ease: [0.34, 1.56, 0.64, 1], // easeOutBack
-        duration: 0.85,
-      });
-    }
+    // Animate both dice with slightly different timing
+    animateSingleDieThrow(die1Ref, die1DirX, die1DirY, 0.8);
+    animateSingleDieThrow(die2Ref, die2DirX, die2DirY, 0.85);
 
     // Wait for animation to complete, then reset
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Reset to original position
-    if (die1Ref.current) {
-      animate(die1Ref.current, {
-        x: 0,
-        y: 0,
-        rotate: 0,
-      }, {
-        type: 'spring',
-        stiffness: 200,
-        damping: 15,
-      });
-    }
-
-    if (die2Ref.current) {
-      animate(die2Ref.current, {
-        x: 0,
-        y: 0,
-        rotate: 0,
-      }, {
-        type: 'spring',
-        stiffness: 200,
-        damping: 15,
-      });
-    }
+    resetSingleDie(die1Ref);
+    resetSingleDie(die2Ref);
 
     setIsThrowing(false);
   };
