@@ -25,7 +25,6 @@ function GamePage() {
   };
 
   const handleThrown = () => {
-    console.log('Dice were thrown!');
     // Trigger dice roll
     handleRoll();
     // Animation is handled automatically in Dice component
